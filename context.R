@@ -31,6 +31,8 @@ library(gridExtra)
 library(scales)
 library(lemon)
 
+library(testcorr)
+
 #######################################################################
 ###                  PARAMETERS & VARIABLES
 #######################################################################

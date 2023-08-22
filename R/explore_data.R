@@ -14,6 +14,7 @@ prepare_rainfall_data <- function(csv_file) {
     new = c("datetime", "rainfall_mm", "dq_code")
   )
   dt[, datetime := as.POSIXct(datetime,  format = '%d/%m/%y %H:%M')]
+  setorderv(dt, c("datetime"), order = 1)
   return(dt)
 }
 
@@ -27,27 +28,44 @@ prepare_stage_data <- function(csv_file) {
   )
   dt[, datetime := as.POSIXct(datetime,  format = '%d/%m/%Y %H:%M:%S')]
   dt[, stage_mm := parse_number(stage_mm)]
+  setorderv(dt, c("datetime"), order = 1)
   return(dt)
 }
 
 # Data prep and combine
 
 mbs <- prepare_stage_data('rua_bruce_stage.csv')
+mbs <- mbs[lubridate::minute(datetime) == 0, ]
 mbs[, `:=`(site = "mtbruce")]
 mbs[, `:=`(measure = "stage")]
 mbs[, `:=`(value = stage_mm)]
 mbs[, `:=`(label = paste(site, "stage", sep = "_"))]
-
 #Only retain hourly measurements in line with hourly rainfall measurements
-mbs <- mbs[lubridate::minute(datetime) == 0, ]
+
+
+# Similar data for change in stage from last hourly measurement
+mbs_ch <-  prepare_stage_data('rua_bruce_stage.csv')
+mbs_ch <- mbs_ch[lubridate::minute(datetime) == 0, ]
+# Ensure ordered in increasing time
+setorderv(mbs_ch, c("datetime"), order = 1)
+mbs_ch[, `:=`(stage_mm_prev = shift(stage_mm, n = 1, fill = NA, type="lag"))]
+mbs_ch[, `:=`(stage_mm_ch = stage_mm - stage_mm_prev)]
+
+mbs_ch[, `:=`(site = "mtbruce")]
+mbs_ch[, `:=`(measure = "stage_ch")]
+mbs_ch[, `:=`(value = stage_mm_ch)]
+mbs_ch[, `:=`(label = paste(site, "stage_ch", sep = "_"))]
+head(mbs_ch)
 
 rb <- prepare_rainfall_data('rua_basin_rainfall.csv')
+rb <- rb[lubridate::minute(datetime) == 0, ]
 rb[, `:=`(site = "basin")]
 rb[, `:=`(measure = "rainfall")]
 rb[, `:=`(value = rainfall_mm)]
 rb[, `:=`(label = paste(site, "rain", sep = "_"))]
 
 mb <- prepare_rainfall_data('rua_bruce_rainfall.csv')
+mb <- mb[lubridate::minute(datetime) == 0, ]
 mb[, `:=`(site = "mtbruce")]
 mb[, `:=`(measure = "rainfall")]
 mb[, `:=`(value = rainfall_mm)]
@@ -56,12 +74,14 @@ mb[, `:=`(label = paste(site, "rain", sep = "_"))]
 keep_cols <- c("datetime", "site", "label", "value")
 data <- rbind(rb[, ..keep_cols],
               mb[, ..keep_cols],
-              mbs[, ..keep_cols])
+              mbs[, ..keep_cols],
+              mbs_ch[, ..keep_cols])
 
-dt_min <- c("2023-03-01 0:00")
-dt_max <- c("2023-03-31 0:00")
+dt_min <- c("2023-03-12 0:00")
+dt_max <- c("2023-03-20 0:00")
 
 data <- data[datetime >= dt_min & datetime <= dt_max]
+table(data$label)
 
 p0 <- ggplot(data, aes(x = datetime, y = value, color = label)) +
   geom_line() +
@@ -71,7 +91,8 @@ p0 <- ggplot(data, aes(x = datetime, y = value, color = label)) +
        x = 'Date',
        y = 'Rainfall (mm)\n') +
   theme_dan1() +
-  facet_wrap( ~ fct_rev(label), ncol = 1, scales = 'free_y')
+  facet_wrap( ~ fct_rev(label), ncol = 2, scales = 'free_y') +
+  theme(legend.position = "none")
 
 grid.arrange(p0)
 
@@ -146,15 +167,27 @@ n_fit <- length(m2$fitted.values)
 comp <- tail(dt,n_fit)
 comp$fitted <- m2$fitted.values
 
+head(comp)
+
 
 head(comp)
 
-pp <- ggplot(data = comp, aes(x=datetime,))+
+p_stage <- ggplot(data = comp, aes(x=datetime))+
   geom_line(aes(x=datetime, y = mb_stage), color = "darkred")+
   geom_line(aes(x=datetime, y = fitted), color="steelblue", linetype="twodash")+
-  theme_dan1()
+  theme_dan1() +
+  labs(title = "Mt. Bruce stage(mm) actual and modelled 2023\n",
+       x = "Date",
+       y = "Ruamahanga stage (mm) at Mt. Bruce bridge")
 
-grid.arrange(pp)
+p_rain <- ggplot(data = comp, aes(x=datetime))+
+  geom_line(aes(x=datetime, y = rb_rain), color = "darkblue")+
+  theme_dan1() +
+  labs(title = "Rain fall measured upstream at Ruamahanga Basin (mm per hour)\n",
+       x = "Date",
+       y = "Rainfall (mm/hr) at Ruamahanga Basin")
+
+grid.arrange(p_stage, p_rain)
 
 
 
